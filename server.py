@@ -1,3 +1,4 @@
+import logging
 import csv
 import hashlib
 import io
@@ -61,10 +62,17 @@ def create_app(store, bot=None, demo=False):
                 response=await client.get(API+path,headers={'Authorization':'Bearer '+token})
             if response.status_code in (401,403):
                 raise HTTPException(401,'Discord authorization expired. Log in again.')
+            if response.status_code == 429:
+                logging.getLogger('pineapple.web').warning('Discord rate limited dashboard lookup: %s',path)
+                raise HTTPException(503,'Discord rate limited the dashboard. Wait a moment, then refresh.')
+            if response.status_code == 404:
+                raise HTTPException(403,'You are no longer a member of this server.')
             response.raise_for_status()
             return response.json()
-        except httpx.HTTPError:
-            raise HTTPException(503,'Discord is temporarily unavailable')
+        except httpx.HTTPError as error:
+            status=getattr(getattr(error,'response',None),'status_code',None)
+            logging.getLogger('pineapple.web').warning('Discord dashboard lookup failed: %s status=%s error=%s',path,status,type(error).__name__)
+            raise HTTPException(503,'Unable to verify Discord access right now. Please try again shortly.')
 
     async def access(request,guild_id,edit=False,owner=False):
         # API keys are read-only and restricted to one guild.
@@ -85,8 +93,16 @@ def create_app(store, bot=None, demo=False):
         guild=bot.get_guild(int(guild_id)) if bot and guild_id.isdigit() else None
         if not guild:
             raise HTTPException(404,'The bot is not connected to this server')
-        # Get membership and role permissions afresh. Do not trust stale OAuth guild lists.
-        me=await discord_get('/users/@me/guilds/'+guild_id+'/member',data['token'])
+        # The connected Gateway keeps member roles and departures current.
+        # Reuse that live state instead of calling the limited OAuth endpoint
+        # for every graph and two-second dashboard refresh.
+        get_member=getattr(guild,'get_member',None)
+        ready=getattr(bot,'is_ready',lambda:False)()
+        member=get_member(int(data['user']['id'])) if ready and get_member else None
+        if member is not None:
+            me={'roles':[str(role.id) for role in member.roles]}
+        else:
+            me=await discord_get('/users/@me/guilds/'+guild_id+'/member',data['token'])
         s=store.settings(guild_id)
         roles=set(me.get('roles',[]))
         permissions=0
