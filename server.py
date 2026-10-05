@@ -114,7 +114,9 @@ def create_app(store, bot=None, demo=False):
                 permissions|=role.permissions.value
         admin=str(guild.owner_id)==data['user']['id'] or bool(permissions & 8)
         manager=admin or (s['elevate_manage_server'] and bool(permissions & 32))
-        editor=manager or bool(roles & set(s['editor_roles']))
+        moderation=discord.Permissions(moderate_members=True,kick_members=True,ban_members=True,manage_messages=True)
+        moderator=bool(permissions & moderation.value)
+        editor=manager or moderator or bool(roles & set(s['editor_roles']))
         viewer=editor or s['dashboard_access']=='members' or bool(roles & set(s['viewer_roles']))
         if not viewer or edit and not editor or owner and not admin:
             raise HTTPException(403,'You do not have permission for this action')
