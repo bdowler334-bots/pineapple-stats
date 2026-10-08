@@ -1,6 +1,7 @@
 import asyncio
 import io
 import logging
+import math
 import os
 import time
 from datetime import datetime, timezone
@@ -583,10 +584,22 @@ class StatsBot(commands.Bot):
             output=await asyncio.to_thread(render)
             await interaction.followup.send(file=discord.File(output,filename='pineapple-stats.png'))
 
+        @self.tree.command(name='ping',description='Check bot connection and Discord heartbeat latency')
+        @app_commands.guild_only()
+        async def ping(interaction:discord.Interaction):
+            if not await self.command_allowed(interaction):
+                return
+            latency=self.latency
+            embed=discord.Embed(title='🍍 Pong!',color=0xf3c644)
+            embed.add_field(name='Bot status',value='🟢 Connected' if self.is_ready() else '🟡 Connecting')
+            embed.add_field(name='Discord heartbeat latency',value=f'{latency*1000:.0f} ms' if math.isfinite(latency) else 'Measuring…')
+            embed.add_field(name='Slash commands',value='Synced' if self.synced else 'Syncing…')
+            await interaction.response.send_message(embed=embed,ephemeral=True)
+
         @self.tree.command(name='help',description='Show Pineapple Stats commands')
         @app_commands.guild_only()
         async def help_command(interaction:discord.Interaction):
-            await interaction.response.send_message('🍍 **Pineapple Stats**\n`/stats` — messages, voice, activity, status, invites\n`/top` — member leaderboard\n`/chart` — graph image\n`/dashboard` — analytics and settings\nAdministrators manage automatic roles, counters, history imports, presets, API keys and permissions on the dashboard.',ephemeral=True)
+            await interaction.response.send_message('🍍 **Pineapple Stats**\n`/stats` — messages, voice, activity, status, invites\n`/top` — member leaderboard\n`/chart` — graph image\n`/dashboard` — analytics and settings\n`/ping` — bot status and Discord latency\nAdministrators manage automatic roles, counters, history imports, presets, API keys and permissions on the dashboard.',ephemeral=True)
 
         @self.tree.error
         async def command_error(interaction,error):
