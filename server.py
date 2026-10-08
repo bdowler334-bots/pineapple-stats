@@ -372,7 +372,7 @@ def create_app(store, bot=None, demo=False):
         if kind=='counter':
             if not guild.get_channel(int(data['channel_id'])):
                 raise ValueError('Select an existing channel in this server')
-            if data.get('metric') not in ('members','humans','bots','online','roles','channels','boosts','clock','youtube','tiktok','role_members','messages','voice','activity','status','invites'):
+            if data.get('metric') not in ('members','humans','bots','online','idle','offline','roles','channels','boosts','clock','youtube','tiktok','role_members','messages','voice','activity','status','invites'):
                 raise ValueError('Unknown counter type')
             if '{value}' not in data.get('template',''):
                 raise ValueError('Counter template must contain {value}')

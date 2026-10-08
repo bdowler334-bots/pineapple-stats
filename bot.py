@@ -64,6 +64,7 @@ class StatsBot(commands.Bot):
         self.last_counters = {}
         self.counter_tasks = {}
         self.counter_status = {}
+        self.counter_wake = {}
         self.social_cache = {}
         self.join_locks = {}
         self.synced = False
@@ -322,11 +323,13 @@ class StatsBot(commands.Bot):
     async def counter_value(self, guild, counter):
         metric=counter.get('metric','members')
         now=time.time()
-        if metric in ('members','humans','bots','online','roles','channels','boosts'):
+        if metric in ('members','humans','bots','online','idle','offline','roles','channels','boosts'):
             return {'members':guild.member_count or len(guild.members),
                     'humans':sum(not m.bot for m in guild.members),
                     'bots':sum(m.bot for m in guild.members),
-                    'online':sum(m.status!=discord.Status.offline for m in guild.members),
+                    'online':sum(m.status==discord.Status.online for m in guild.members),
+                    'idle':sum(m.status in (discord.Status.idle,discord.Status.dnd) for m in guild.members),
+                    'offline':sum(m.status==discord.Status.offline for m in guild.members),
                     'roles':len(guild.roles),'channels':len(guild.channels),
                     'boosts':guild.premium_subscription_count or 0}[metric]
         if metric=='clock':
@@ -404,7 +407,9 @@ class StatsBot(commands.Bot):
 
     async def counter_worker(self, guild, channel_id):
         key = (guild.id, str(channel_id))
+        wake=self.counter_wake.setdefault(key,asyncio.Event())
         while self.is_ready() and not self.is_closed():
+            wake.clear()
             counter = next((c for c in self.store.objects(guild.id, 'counter')
                 if str(c['channel_id']) == str(channel_id) and c.get('enabled', True)), None)
             channel = guild.get_channel(int(channel_id))
@@ -428,7 +433,10 @@ class StatsBot(commands.Bot):
                 self.store.log(guild.id, self.user.id, 'counter_error', {'id': counter['id'], 'type': type(exc).__name__})
                 interval = max(interval, 30)
             # No queued snapshots: the next cycle reads the newest config and value.
-            await asyncio.sleep(interval)
+            try:
+                await asyncio.wait_for(wake.wait(),timeout=interval)
+            except asyncio.TimeoutError:
+                pass
 
     @tasks.loop(seconds=2)
     async def live_tick(self):
@@ -584,6 +592,29 @@ class StatsBot(commands.Bot):
             output=await asyncio.to_thread(render)
             await interaction.followup.send(file=discord.File(output,filename='pineapple-stats.png'))
 
+        @self.tree.command(name='refresh',description='Refresh channel counters and show current member status')
+        @app_commands.guild_only()
+        async def refresh(interaction:discord.Interaction):
+            if not await self.command_allowed(interaction):
+                return
+            await interaction.response.defer(ephemeral=True)
+            await self.update_counters(interaction.guild)
+            for key,wake in self.counter_wake.items():
+                if key[0]==interaction.guild_id:
+                    wake.set()
+            groups=[('🟢 Online',lambda m:m.status==discord.Status.online),
+                    ('🟡 Idle / Do Not Disturb',lambda m:m.status in (discord.Status.idle,discord.Status.dnd)),
+                    ('🔴 Offline / Invisible',lambda m:m.status==discord.Status.offline)]
+            lines=[];summary=[]
+            for label,predicate in groups:
+                members=sorted((m for m in interaction.guild.members if predicate(m)),key=lambda m:m.display_name.casefold())
+                summary.append(f'{label}: **{len(members)}**')
+                lines.append(f'{label} ({len(members)})')
+                lines.extend(f'{label[0]} {m.display_name} (@{m.name})' for m in members)
+                lines.append('')
+            await interaction.followup.send('🍍 **Current member status**\n'+'\n'.join(summary)+'\nCounter refresh requested. Channel renames follow Discord rate limits.\nFull member list attached; includes bots. Invisible members appear offline.',
+                file=discord.File(io.BytesIO('\n'.join(lines).encode()),filename='pineapple-member-status.txt'),ephemeral=True)
+
         @self.tree.command(name='ping',description='Check bot connection and Discord heartbeat latency')
         @app_commands.guild_only()
         async def ping(interaction:discord.Interaction):
@@ -599,7 +630,7 @@ class StatsBot(commands.Bot):
         @self.tree.command(name='help',description='Show Pineapple Stats commands')
         @app_commands.guild_only()
         async def help_command(interaction:discord.Interaction):
-            await interaction.response.send_message('🍍 **Pineapple Stats**\n`/stats` — messages, voice, activity, status, invites\n`/top` — member leaderboard\n`/chart` — graph image\n`/dashboard` — analytics and settings\n`/ping` — bot status and Discord latency\nAdministrators manage automatic roles, counters, history imports, presets, API keys and permissions on the dashboard.',ephemeral=True)
+            await interaction.response.send_message('🍍 **Pineapple Stats**\n`/stats` — messages, voice, activity, status, invites\n`/top` — member leaderboard\n`/chart` — graph image\n`/dashboard` — analytics and settings\n`/ping` — bot status and Discord latency\n`/refresh` — refresh counters and list current member statuses\nAdministrators manage automatic roles, counters, history imports, presets, API keys and permissions on the dashboard.',ephemeral=True)
 
         @self.tree.error
         async def command_error(interaction,error):
