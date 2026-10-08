@@ -327,9 +327,9 @@ class StatsBot(commands.Bot):
             return {'members':guild.member_count or len(guild.members),
                     'humans':sum(not m.bot for m in guild.members),
                     'bots':sum(m.bot for m in guild.members),
-                    'online':sum(m.status==discord.Status.online for m in guild.members),
-                    'idle':sum(m.status in (discord.Status.idle,discord.Status.dnd) for m in guild.members),
-                    'offline':sum(m.status==discord.Status.offline for m in guild.members),
+                    'online':sum(not m.bot and m.status==discord.Status.online for m in guild.members),
+                    'idle':sum(not m.bot and m.status in (discord.Status.idle,discord.Status.dnd) for m in guild.members),
+                    'offline':sum(not m.bot and m.status==discord.Status.offline for m in guild.members),
                     'roles':len(guild.roles),'channels':len(guild.channels),
                     'boosts':guild.premium_subscription_count or 0}[metric]
         if metric=='clock':
@@ -607,12 +607,12 @@ class StatsBot(commands.Bot):
                     ('🔴 Offline / Invisible',lambda m:m.status==discord.Status.offline)]
             lines=[];summary=[]
             for label,predicate in groups:
-                members=sorted((m for m in interaction.guild.members if predicate(m)),key=lambda m:m.display_name.casefold())
+                members=sorted((m for m in interaction.guild.members if not m.bot and predicate(m)),key=lambda m:m.display_name.casefold())
                 summary.append(f'{label}: **{len(members)}**')
                 lines.append(f'{label} ({len(members)})')
                 lines.extend(f'{label[0]} {m.display_name} (@{m.name})' for m in members)
                 lines.append('')
-            await interaction.followup.send('🍍 **Current member status**\n'+'\n'.join(summary)+'\nCounter refresh requested. Channel renames follow Discord rate limits.\nFull member list attached; includes bots. Invisible members appear offline.',
+            await interaction.followup.send('🍍 **Current member status**\n'+'\n'.join(summary)+'\nCounter refresh requested. Channel renames follow Discord rate limits.\nFull member list attached; bots excluded. Invisible members appear offline.',
                 file=discord.File(io.BytesIO('\n'.join(lines).encode()),filename='pineapple-member-status.txt'),ephemeral=True)
 
         @self.tree.command(name='ping',description='Check bot connection and Discord heartbeat latency')
